@@ -1,5 +1,5 @@
 # Swift Poker Bot
-Swift Poker Bot is an application that processes poker tables and tracks the game state, allowing integration with an LLM or a Bayesian Belief Network (BBN) to determine the ideal decision.
+Swift Poker Bot is an application that processes poker tables and tracks the game state, allowing integration with an LLM or a Bayesian Belief Network (BBN), or other solutions, to determine the ideal decision.
 
 I built this project to explore automated decision-making and to showcase large-scale software architecture. It combines computer vision, multiple OCR methods, Custom ZNCC Template matching, and AI reasoning in an attempt to replicate a professional poker player.
 
@@ -16,16 +16,76 @@ Right now there are two apps:
 - **Poker Bot (Coffee)**  
   The prototype is working but not uploaded yet. This is the part that actually plays — it processes the table map, figures out what’s going on, and then relies on an LLM or BBN to decide an action.
 
-A lot of the code works, but it is still a prototype with many areas for improvement and simplification. I have a list of planned additions, modifications, and simplifications, which I’ll be adding at the bottom.
+The code works, but it is still a prototype with many areas for improvement and simplification. I have a list of planned additions, modifications, and simplifications, which I’ll be adding at the bottom.
 
 
 ## Technical Architecture
+<p align="center">
+  <img src="resources/diagram.png" alt="Architecture Diagram" width="800"/>
+</p>
+<p align="center"><em>These Figures are some of the prototypes I used when designing the system, I had a good idea on what was needed but had to put it together. As a WARNING these displayed diagrams are not accurate representations of the code base, just some of my initial designs.</em></p>
+
+
+
+
+### Table Stream 
+ * Capturing still images from a live feed using Apple's CGWindow API 
+
+### Regions of Interest
+ * Rectangle Object (Hard coded dimensions)
+ * Currently cut from the current img stream, then processed and analyzed with Table Reading
+ * Fills into a custom 'player' object (cards, balance, action, etc...)
+
+### Table Reading
+ * Apple's Vision VN get text (Current)
+ * Template Matching (Current)
+ * RGB Matching (Current)
+ * Apples CoreML (Deprecated)
+ * Tesseract (Deprecated)
+ 
+ 
+### Game State Management
+ * Custom Data Structure 
+
+### Deciding Action 
+ * Direct LLM integration with pre-generated prompts available based on game state
+
+ 
+
+### Automated Action
+ * 
+
+
+## UI Preview
+
+![Image of the UI showing setting available for img process. Entire list will be available in documentation and it’s in a folder resources](resources/baseParameters.png)
+
+<p align="center">
+  <img src="resources/processedImg1.png" alt="Processed Regions 1" width="400"/>
+  <img src="resources/processedImg2.png" alt="Processed Regions 2" width="380"/>
+</p>
+
+<p align="center">
+  <em>Figure: Processed regions output from Table Reader</em>
+</p>
+
 ### Table Reader
 - **Screen Capture Engine** - Apple CGWindow API–based capture with custom data structures for maintaining and rendering dynamic regions.
-- **Optical Character Recognition (OCR)** - Apple Vision, Tesseract, and custom CoreML models
+- **Optical Character Recognition (OCR)** - Apple Vision, from custom user defined preprocessing pipeline's
 - **Region Mapping System** - Visual interface for defining table elements
 - **Confidence Tracking** - Reliability scoring across all recognition methods
 - **Training Data Collection** - Automated dataset generation for model improvement
+<p align="center">
+  <img src="resources/TemplateMatching.png" alt="Template Matching Example" height="300"/>
+</p>
+
+<p align="center">
+  <em>Figure:Template Matcher UI, allows users to save and label a template, view pre-existing ones, delete incorrect ones from memory, and test accuracy of current readings (Need to normalize scale to percent)</em>
+</p>
+
+
+
+
 ### PokerBot
 - **Game State Parser** - Converts visual data into structured game information
 - **LLM Integration** - Uses pre-trained language models for strategic reasoning
@@ -59,28 +119,8 @@ brew install tesseract
 ```
 
 I will be updating this potential problems you could run into, and how to fix them
-## Setting Up a Table 
-## Planned Backlog
-  [] Make the separate ML trainers into a single one for CORE ML support 
 
-## Processing
-
- [] Simplify the PreProcessing Pipeline 
- - [] Remove all the 'Super Heavy' preprocessing 
- - [] Pick and Refine the most optimized option
-
-
- [] Stop cropping img from the table, process the big img at once where feasible 
-
- [] Re-add the SB and BB not blinds 
- [] Account for the All-In blinds edge case 
- [] Make Preprocessing instructions saveable to the table map
- [] Convert the Poker Bot to an anchor system 
- [] save on expensive resources 
- [] MAKE The Text Edit More Uniform (Money formatting)
- 
-
-
+## Reviewing Logs
 
  ```Logs
 
@@ -225,12 +265,10 @@ preflopAction seat 1 OCR action: 'Call'
 ✅ OCR balance for seat 1: 189.13BB
 
  ```
-*Make sure we only read balances of those sitting and when they are needed. 
-Use Dick Reuters bot to see how they are handling the scrape times most efficiently 
 
 
 
-WORK ON OCR First 
+
 Work on the Logging don't print if it's nil 
 Just print the thing 
 Switch it to fast not accurate 
@@ -264,4 +302,19 @@ Next need to Consider all the logs, right now we print things to console I still
 I wanna have the best categories for my logging so need to decide which ones we will use? 
 we may need new logs I'm not doing yet. 
 
-Need to switch the thing or make sure it's on fast and not accurate because that may actually be better
+
+## Planned Backlog
+- [ ] Ensure we aren't overscraping 
+- [ ] Simplify the preprocessing Pipeline 
+  - [ ] Remove all the Heavy preprocessing 
+  - [ ] Pick and Refine the most optimized options
+- [ ] Refine ZNCC Templating
+- [x] Re-add the SB and BB not blinds 
+- [ ] Account for the All-In blinds edge case 
+- [ ] Make Preprocessing instructions saveable to the table map
+- [ ] Convert the Poker Bot to an anchor system 
+- [x] MAKE The Text Edit More Uniform (Money formatting)
+- [ ] Optimize Bot's RGB Detection
+- [ ] Make Mapped table seats a modular number (locked at 8 rn)
+- [ ] Redesign the img capture pipeline to benefit from Apple's robust API
+
