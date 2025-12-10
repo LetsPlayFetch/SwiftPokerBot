@@ -14,9 +14,9 @@ struct ImageUtilities {
         guard let tiff = image.tiffRepresentation,
               let ciImage = CIImage(data: tiff) else { return nil }
         
-        // Core Image coordinates use (0,0) at bottom‑left.
-        // RegionBox.rect comes in **window space** with origin at top‑left,
-        // so flip the Y‑axis:
+        // Core Image coordinates use (0,0) at bottom-left.
+        // RegionBox.rect comes in **window space** with origin at top-left,
+        // so flip the Y-axis:
         let flipped = CGRect(
             x: rect.origin.x,
             y: ciImage.extent.height - rect.origin.y - rect.size.height,
@@ -41,14 +41,6 @@ struct ImageUtilities {
     static func croppedImage(in screenshot: NSImage, for region: RegionBox) -> NSImage? {
         guard let cropCI = cropROI(screenshot, rect: region.rect) else { return nil }
         return ciToNSImage(cropCI)
-    }
-    
-    /// Returns the preprocessed cropped region as an NSImage
-    static func preprocessedImage(in screenshot: NSImage, for region: RegionBox) -> NSImage? {
-        guard let cropCI = cropROI(screenshot, rect: region.rect) else { return nil }
-        let baseProcessor = BaseOCRProcessor()
-        let processedCI = baseProcessor.preprocessGeneric(cropCI)
-        return ciToNSImage(processedCI)
     }
     
     // MARK: - Image Format Conversions
@@ -145,6 +137,39 @@ struct ImageUtilities {
         let scaledImage = ciToNSImage(scaledCI)
         print("✅ Scaled image from \(image.size) to \(scaledImage.size)")
         return scaledImage
+    }
+    
+    /// Resize NSImage to exact dimensions using high-quality scaling
+    static func resizeImage(_ image: NSImage, to size: CGSize) -> NSImage? {
+        guard let tiffData = image.tiffRepresentation,
+              let ciImage = CIImage(data: tiffData) else {
+            return nil
+        }
+        
+        // Calculate scale factors
+        let scaleX = size.width / ciImage.extent.width
+        let scaleY = size.height / ciImage.extent.height
+        
+        // Apply scale transform
+        let scaledImage = ciImage.applyingFilter("CILanczosScaleTransform", parameters: [
+            kCIInputScaleKey: max(scaleX, scaleY)  // Use max to maintain aspect ratio initially
+        ])
+        
+        // Crop to exact size if needed
+        let finalImage: CIImage
+        if scaledImage.extent.width != size.width || scaledImage.extent.height != size.height {
+            let cropRect = CGRect(
+                x: (scaledImage.extent.width - size.width) / 2,
+                y: (scaledImage.extent.height - size.height) / 2,
+                width: size.width,
+                height: size.height
+            )
+            finalImage = scaledImage.cropped(to: cropRect)
+        } else {
+            finalImage = scaledImage
+        }
+        
+        return ciToNSImage(finalImage)
     }
     
     // MARK: - Color Analysis
@@ -246,9 +271,4 @@ extension NSImage {
     func scaled(by factor: CGFloat) -> NSImage {
         return ImageUtilities.scaleImage(self, by: factor)
     }
-    
-    /// Convenience method for sRGB conversion         //Reimplemet when migrating
-    //func convertToSRGB() -> NSImage? {
-    //return ImageUtilities.convertToSRGB(self)
-    //}
 }

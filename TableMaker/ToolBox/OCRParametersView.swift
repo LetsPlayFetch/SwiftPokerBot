@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// display for processing options
+/// Display for processing options - now works for ALL OCR types
 struct OCRParametersView: View {
     @Binding var parameters: OCRParameters
     @Binding var ocrService: OCRService
+    let selectedOCRType: OCRType
     let selectedRegionID: UUID?
     let drawnRegions: [RegionBox]
     let screenshot: NSImage
@@ -14,7 +15,8 @@ struct OCRParametersView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Base OCR Parameters")
+            // Show which OCR type's parameters are being edited
+            Text("\(ocrTypeDisplayName()) Parameters")
                 .font(.headline)
                 .padding(.bottom, 4)
             
@@ -271,7 +273,7 @@ struct OCRParametersView: View {
             }
             
             Button("Reset to Defaults") {
-                parameters = OCRParameters.default
+                resetToDefaults()
                 onParametersChanged()
             }
             .buttonStyle(.bordered)
@@ -279,6 +281,85 @@ struct OCRParametersView: View {
         .padding()
         .background(Color.gray.opacity(0.1))
         .cornerRadius(8)
+    }
+    
+    // MARK: - Helper Functions
+    
+    private func ocrTypeDisplayName() -> String {
+        switch selectedOCRType {
+        case .baseOCR:
+            return "Base OCR"
+        case .playerBet:
+            return "Player Bet"
+        case .playerBalance:
+            return "Player Balance"
+        case .playerAction:
+            return "Player Action"
+        case .tablePot:
+            return "Table Pot"
+        }
+    }
+    
+    private func resetToDefaults() {
+        switch selectedOCRType {
+        case .baseOCR:
+            parameters = OCRParameters.default
+        case .playerBet:
+            parameters = OCRParameters(
+                scale: 6.0,
+                sharpness: 0.4,
+                contrast: 1.5,
+                brightness: 0.0,
+                saturation: 0.0,
+                blurRadius: 2.0,
+                threshold: 0.55,
+                morphRadius: 0.5,
+                colorFilterMode: .hsvFilter,
+                hsvHueMin: 60.0,
+                hsvHueMax: 180.0,
+                hsvSatMin: 0.30,
+                hsvSatMax: 1.0
+            )
+        case .playerBalance:
+            parameters = OCRParameters(
+                scale: 4.0,
+                sharpness: 0.40,
+                contrast: 1.60,
+                brightness: 0.30,
+                saturation: 0.0,
+                blurRadius: 0.50,
+                threshold: 0.20,
+                morphRadius: 0.10,
+                colorFilterMode: .colorDistance,
+                colorDistanceThreshold: 0.40
+            )
+        case .playerAction:
+            parameters = OCRParameters(
+                scale: 4.0,
+                sharpness: 0.40,
+                contrast: 1.40,
+                brightness: 0.40,
+                saturation: 0.0,
+                blurRadius: 0.50,
+                threshold: 0.50,
+                morphRadius: 0.10,
+                colorFilterMode: .colorDistance,
+                colorDistanceThreshold: 0.40
+            )
+        case .tablePot:
+            parameters = OCRParameters(
+                scale: 4.0,
+                sharpness: 0.40,
+                contrast: 1.60,
+                brightness: 0.30,
+                saturation: 0.0,
+                blurRadius: 0.50,
+                threshold: 0.25,
+                morphRadius: 0.10,
+                colorFilterMode: .colorDistance,
+                colorDistanceThreshold: 0.80
+            )
+        }
     }
 }
 

@@ -21,8 +21,8 @@ class MLCardProcessor {
         print("📂 Found .mlmodelc files: \(allMLModelc)")
         
         // Try to find the compiled model first (Xcode auto-compiles .mlmodel to .mlmodelc)
-        guard let modelURL = Bundle.main.url(forResource: "TrainedCardsModel", withExtension: "mlmodelc") else {
-            print("❌ TrainedCardsModel.mlmodelc not found in bundle")
+        guard let modelURL = Bundle.main.url(forResource: "ClubWPTCards", withExtension: "mlmodelc") else {
+            print("❌ ClubWPTCards.mlmodelc not found in bundle")
             print("📂 Bundle path: \(Bundle.main.bundlePath)")
             return
         }

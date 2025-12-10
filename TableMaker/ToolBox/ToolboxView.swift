@@ -15,16 +15,18 @@ struct ToolboxView: View {
     @State private var ocrValue: String = ""
     @State private var averageColorHex: String = ""
     @State private var regionName: String = ""
-    @State private var selectedOCRType: OCRType = .cardRank
+    @State private var selectedOCRType: OCRType = .baseOCR
     @State private var ocrImage: NSImage?
     @State private var selectedRGBType: RGBType = .dealerButton
     @State private var rgbValue: String = ""
     
-    @State private var ocrParameters = OCRParameters.default
     @State private var ocrService = OCRService()
-    @State private var showTrainingDataCollection = false
-    @State private var showCoreMlDataCollection = false
     @State private var showMLCards = false
+    
+    // RGB Service State
+    @State private var rgbService = RGBService()
+    @State private var rgbTargets = RGBTargets.default
+    @State private var showRGBConfig = false
     
     // Rapid Collection State with Tag Popup
     @State private var rapidCollectionMode = false
@@ -32,6 +34,10 @@ struct ToolboxView: View {
     @State private var showRapidCollection = false
     @State private var showTagPopup = false
     @State private var pendingRegion: RegionBox?
+    
+    // Template Matching State
+    @StateObject private var templateProcessor = TemplateCardProcessor()
+    @State private var showTemplateMatching = false
 
     var body: some View {
         ScrollView {
@@ -51,16 +57,17 @@ struct ToolboxView: View {
                     performRGB: performRGB
                 )
                 
-                if selectedOCRType == .baseOCR {
-                    OCRParametersView(
-                        parameters: $ocrParameters,
-                        ocrService: $ocrService,
-                        selectedRegionID: selectedRegionID,
-                        drawnRegions: drawnRegions,
-                        screenshot: screenshot,
-                        onParametersChanged: updateOCRPreview
-                    )
-                }
+                // Show OCRParametersView for ALL OCR types
+                OCRParametersView(
+                    parameters: bindingForSelectedOCRType(),
+                    ocrService: $ocrService,
+                    selectedOCRType: selectedOCRType,
+                    selectedRegionID: selectedRegionID,
+                    drawnRegions: drawnRegions,
+                    screenshot: screenshot,
+                    onParametersChanged: updateOCRPreview
+                )
+                
                 // ML Cards Section
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -77,6 +84,58 @@ struct ToolboxView: View {
                     
                     if showMLCards {
                         MLTestView(
+                            selectedRegion: selectedRegionID.flatMap { id in
+                                drawnRegions.first { $0.id == id }
+                            },
+                            screenshot: screenshot
+                        )
+                    }
+                }
+                .padding(.vertical, 8)
+                
+                // RGB Configuration Section
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("RGB Configuration")
+                            .font(.headline)
+                        Spacer()
+                        Button(action: {
+                            showRGBConfig.toggle()
+                        }) {
+                            Image(systemName: showRGBConfig ? "chevron.up" : "chevron.down")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    if showRGBConfig {
+                        RGBConfigView(
+                            rgbTargets: $rgbTargets,
+                            rgbService: $rgbService,
+                            selectedRegionID: selectedRegionID,
+                            drawnRegions: drawnRegions,
+                            screenshot: screenshot
+                        )
+                    }
+                }
+                .padding(.vertical, 8)
+                
+                // Template Matching Section
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Template Matching")
+                            .font(.headline)
+                        Spacer()
+                        Button(action: {
+                            showTemplateMatching.toggle()
+                        }) {
+                            Image(systemName: showTemplateMatching ? "chevron.up" : "chevron.down")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    if showTemplateMatching {
+                        TemplateMatchingView(
+                            templateProcessor: templateProcessor,
                             selectedRegion: selectedRegionID.flatMap { id in
                                 drawnRegions.first { $0.id == id }
                             },
@@ -109,59 +168,13 @@ struct ToolboxView: View {
                 }
                 .padding(.vertical, 8)
                 
-                // Training Data Section
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("OCR Training Data")
-                            .font(.headline)
-                        Spacer()
-                        Button(action: {
-                            showTrainingDataCollection.toggle()
-                        }) {
-                            Image(systemName: showTrainingDataCollection ? "chevron.up" : "chevron.down")
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    
-                    if showTrainingDataCollection {
-                        TrainingDataView(
-                            selectedRegion: selectedRegionID.flatMap { id in
-                                drawnRegions.first { $0.id == id }
-                            },
-                            screenshot: screenshot,
-                            selectedOCRType: selectedOCRType,
-                            ocrService: ocrService
-                        )
-                    }
-                }
-                .padding(.vertical, 8)
-                
-                // CoreML Data Section
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("CoreML Training Data")
-                            .font(.headline)
-                        Spacer()
-                        Button(action: {
-                            showCoreMlDataCollection.toggle()
-                        }) {
-                            Image(systemName: showCoreMlDataCollection ? "chevron.up" : "chevron.down")
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    
-                    if showCoreMlDataCollection {
-                        CoreMLDataView(
-                            selectedRegion: selectedRegionID.flatMap { id in
-                                drawnRegions.first { $0.id == id }
-                            },
-                            screenshot: screenshot
-                        )
-                    }
-                }
-                .padding(.vertical, 8)
-                
-                MapControlsView(drawnRegions: $drawnRegions, selectedRegionID: $selectedRegionID)
+                MapControlsView(
+                    drawnRegions: $drawnRegions,
+                    selectedRegionID: $selectedRegionID,
+                    ocrService: $ocrService,
+                    rgbTargets: $rgbTargets,
+                    onLoad: handleMapLoad
+                )
                 
                 RegionListView(
                     drawnRegions: $drawnRegions,
@@ -221,21 +234,37 @@ struct ToolboxView: View {
         }
         .onChange(of: selectedRegionID) { _ in
             updateStateForSelectedRegion()
-            
-            // Handle rapid collection with tag popup system
             handleRapidCollectionForSelectedRegion()
         }
         .onChange(of: drawnRegions) { _ in
             updateStateForSelectedRegion()
         }
-        .onChange(of: ocrParameters) { _ in
-            ocrService.updateBaseOCRParameters(ocrParameters)
-        }
         .onChange(of: selectedOCRType) { _ in
             updateStateForSelectedRegion()
         }
+        .onChange(of: rgbTargets) { newTargets in
+            rgbService.targets = newTargets
+        }
     }
 
+    // MARK: - Helper Functions
+    
+    /// Get binding for the currently selected OCR type's config
+    private func bindingForSelectedOCRType() -> Binding<OCRParameters> {
+        switch selectedOCRType {
+        case .baseOCR:
+            return $ocrService.baseOCRConfig
+        case .playerBet:
+            return $ocrService.playerBetConfig
+        case .playerBalance:
+            return $ocrService.playerBalanceConfig
+        case .playerAction:
+            return $ocrService.playerActionConfig
+        case .tablePot:
+            return $ocrService.tablePotConfig
+        }
+    }
+    
     private func updateStateForSelectedRegion() {
         print("SelectedRegionID: \(String(describing: selectedRegionID))")
 
@@ -250,13 +279,9 @@ struct ToolboxView: View {
                 regionName = region.name
             }
             
-            ocrService.updateBaseOCRParameters(ocrParameters)
+            // Perform OCR with selected type
+            performOCR(for: selectedOCRType, in: region)
             
-            ocrService.readValue(in: screenshot, for: region) { value in
-                DispatchQueue.main.async {
-                    ocrValue = value ?? ""
-                }
-            }
             let avgHex = ocrService.averageColorString(in: screenshot, for: region) ?? ""
             DispatchQueue.main.async {
                 averageColorHex = avgHex
@@ -265,18 +290,15 @@ struct ToolboxView: View {
         }
     }
     
-    // Handle rapid collection with tag popup system
     private func handleRapidCollectionForSelectedRegion() {
         guard rapidCollectionMode,
               let id = selectedRegionID,
               let region = drawnRegions.first(where: { $0.id == id }) else { return }
         
-        // Store the region and show tag popup
         pendingRegion = region
         showTagPopup = true
     }
     
-    // Handle tag selection and save images
     private func handleTagSelection(tag: String) {
         guard let region = pendingRegion else { return }
         
@@ -301,6 +323,21 @@ struct ToolboxView: View {
     private func updateOCRPreview() {
         updateStateForSelectedRegion()
     }
+    
+    private func handleMapLoad(ocrConfigs: OCRConfigs, rgbTargets: RGBTargets) {
+        // Update OCR configs
+        ocrService.baseOCRConfig = ocrConfigs.baseOCR
+        ocrService.playerBetConfig = ocrConfigs.playerBet
+        ocrService.playerBalanceConfig = ocrConfigs.playerBalance
+        ocrService.playerActionConfig = ocrConfigs.playerAction
+        ocrService.tablePotConfig = ocrConfigs.tablePot
+        
+        // Update RGB targets
+        self.rgbTargets = rgbTargets
+        self.rgbService.targets = rgbTargets
+        
+        print("✅ Loaded OCR configs and RGB targets into services")
+    }
 
     private func performOCR(for type: OCRType, in region: RegionBox) {
         switch type {
@@ -308,13 +345,6 @@ struct ToolboxView: View {
             ocrService.readValue(in: screenshot, for: region) { value in
                 DispatchQueue.main.async {
                     ocrValue = value ?? ""
-                }
-            }
-        case .cardRank:
-            ocrService.readCardRank(in: screenshot, for: region) { image, value in
-                DispatchQueue.main.async {
-                    ocrImage = image
-                    ocrValue = value
                 }
             }
         case .playerBet:
@@ -349,14 +379,13 @@ struct ToolboxView: View {
     }
     
     private func performRGB(for type: RGBType, in region: RegionBox) {
-        let service = RGB()
         switch type {
         case .dealerButton:
-            rgbValue = service.checkDealerButton(in: screenshot, for: region) ? "Dealer Button" : "No Match"
+            rgbValue = rgbService.checkDealerButton(in: screenshot, for: region) ? "Dealer Button" : "No Match"
         case .cardBack:
-            rgbValue = service.checkCardBack(in: screenshot, for: region) ? "Card Back" : "No Match"
+            rgbValue = rgbService.checkCardBack(in: screenshot, for: region) ? "Card Back" : "No Match"
         case .cardSuit:
-            rgbValue = service.detectCardSuit(in: screenshot, for: region)?.rawValue ?? "Unknown"
+            rgbValue = rgbService.detectCardSuit(in: screenshot, for: region)?.rawValue ?? "Unknown"
         }
     }
 }

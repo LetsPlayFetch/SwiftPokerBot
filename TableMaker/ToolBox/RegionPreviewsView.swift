@@ -25,21 +25,28 @@ struct RegionPreviewsView: View {
                     .foregroundColor(.red)
             }
 
+            // FIX: Use'd configs from ocrService instead of creating new instances
             let processed: NSImage? = {
+                guard let cropCI = ImageUtilities.cropROI(screenshot, rect: selectedRegion.rect) else {
+                    return nil
+                }
+                
+                let config: OCRParameters
                 switch selectedOCRType {
                 case .baseOCR:
-                    return ocrService.preprocessedImage(in: screenshot, for: selectedRegion)
-                case .cardRank:
-                    return CardRankOCR().preprocessedPreviewImage(from: screenshot, region: selectedRegion)
+                    config = ocrService.baseOCRConfig
                 case .playerBet:
-                    return PlayerBetOCR().preprocessedPreviewImage(from: screenshot, region: selectedRegion)
+                    config = ocrService.playerBetConfig
                 case .playerBalance:
-                    return PlayerBalanceOCR().preprocessedPreviewImage(from: screenshot, region: selectedRegion)
+                    config = ocrService.playerBalanceConfig
                 case .playerAction:
-                    return PlayerActionOCR().preprocessedPreviewImage(from: screenshot, region: selectedRegion)
+                    config = ocrService.playerActionConfig
                 case .tablePot:
-                    return TablePotOCR().preprocessedPreviewImage(from: screenshot, region: selectedRegion)
+                    config = ocrService.tablePotConfig
                 }
+                
+                let processedCI = OCRPreprocessor.preprocess(image: cropCI, config: config)
+                return ImageUtilities.ciToNSImage(processedCI)
             }()
 
             if let processed {

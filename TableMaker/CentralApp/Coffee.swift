@@ -1,3 +1,5 @@
+/// Purpose: Allow User to Connect with windows 
+
 import SwiftUI
 import ScreenCaptureKit
 
@@ -64,11 +66,7 @@ struct Coffee: View {
     private func refreshWindowList() async {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            // Debug: print window list details
-            for win in content.windows {
-                let pid = win.owningApplication?.processID ?? -1
-                print("🔍 SCWindow title='\(win.title ?? "nil")', processID=\(pid), windowID=\(win.windowID), frame=\(win.frame)")
-            }
+            // FUTURE LOGGING
             availableWindows = content.windows
             selectedWindow = nil // Reset selection when refreshing
         } catch {

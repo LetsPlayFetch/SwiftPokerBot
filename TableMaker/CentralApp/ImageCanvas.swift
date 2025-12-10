@@ -15,15 +15,18 @@ struct ImageCanvas: View {
     var body: some View {
         GeometryReader { geometry in
             
-            // Scale diplayed Img based on screen size
+            // Scale displayed Img based on screen size
             let scaleX = geometry.size.width / image.size.width
             let scaleY = geometry.size.height / image.size.height
             let scale = min(scaleX, scaleY)
             
-            // Center img 
+            // Center img
             let imageSizeScaled = CGSize(width: image.size.width * scale, height: image.size.height * scale)
             let offsetX = (geometry.size.width - imageSizeScaled.width) / 2
             let offsetY = (geometry.size.height - imageSizeScaled.height) / 2
+
+            // Simple image size debug
+            let _ = print("📐 Image size: \(image.size.width) × \(image.size.height)")
 
             let scaledGesture = DragGesture(minimumDistance: 0)
                 .onChanged { value in

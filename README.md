@@ -23,7 +23,7 @@ The code works, but it is still a prototype with many areas for improvement and 
 <p align="center">
   <img src="resources/diagram.png" alt="Architecture Diagram" width="800"/>
 </p>
-<p align="center"><em>These Figures are some of the prototypes I used when designing the system, I had a good idea on what was needed but had to put it together. As a WARNING these displayed diagrams are not accurate representations of the code base, just some of my initial designs.</em></p>
+<p align="center"><em>These Figures are some of the prototypes I used when designing the system, I had a good idea on what was needed to build, but had no plan to put it together. As a WARNING these displayed diagrams are not accurate representations of the code base, just some of my initial designs.</em></p>
 
 
 
@@ -35,7 +35,21 @@ The code works, but it is still a prototype with many areas for improvement and 
  * Rectangle Object (Hard coded dimensions)
  * Currently cut from the current img stream, then processed and analyzed with Table Reading
  * Fills into a custom 'player' object (cards, balance, action, etc...)
-
+```
+ struct PlayerRegion: Identifiable, Codable {
+    let id: Int      //Seat number
+    //var seated: RegionBox //see if player is there Seated
+    var name: RegionBox    //Players name
+    var balance: RegionBox     //Balance
+    var waiting: RegionBox    //read region if sitting out
+    var action: RegionBox     //SB,BB,POST,CALL,RAISE,ALL-IN,SITTING OUT
+    var bet: RegionBox        //Total amount player put in on a given street (blank = none)
+    var cards: [PlayerCards]  //
+    var cardBack: RegionBox   // Single card back detection region
+    var dealer: RegionBox
+}
+```
+ * Additional structs exist for other RegionBoxes such as Community info (board cards, table pot, etc)
 ### Table Reading
  * Apple's Vision VN get text (Current)
  * Template Matching (Current)
@@ -43,6 +57,17 @@ The code works, but it is still a prototype with many areas for improvement and 
  * Apples CoreML (Deprecated)
  * Tesseract (Deprecated)
  
+
+## Reading Players Names 
+Not a current feature but nessicary for the planned intergrated hand db and player tendancy lookup for max exploit. Plan is to use Apple's OCR VNgetText()
+
+## Reading Players in Hands and the dealer button location
+Pixel detection, checks color avg of the relevant regionboxes to determine the states.
+
+## Reading Players Stacks, Bets, and Tablepot
+
+## Reading Heros Cards
+ZNCC template matching, is quite accurate only if tables sizes / positions are static.
  
 ### Game State Management
  * Custom Data Structure 
@@ -57,7 +82,7 @@ The code works, but it is still a prototype with many areas for improvement and 
 
 
 ## UI Preview
-
+The application was built for ringed poker games, this demo shows its application to video poker
 ![Image of the UI showing setting available for img process. Entire list will be available in documentation and it’s in a folder resources](resources/baseParameters.png)
 
 <p align="center">
@@ -304,6 +329,7 @@ we may need new logs I'm not doing yet.
 
 
 ## Planned Backlog
+
 - [ ] Ensure we aren't overscraping 
 - [ ] Simplify the preprocessing Pipeline 
   - [ ] Remove all the Heavy preprocessing 

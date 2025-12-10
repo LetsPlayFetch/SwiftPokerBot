@@ -33,7 +33,7 @@ struct HeaderControlsView: View {
 
             Picker("OCR Mode", selection: $selectedOCRType) {
                 Text("Base OCR").tag(OCRType.baseOCR)
-                Text("Card Rank").tag(OCRType.cardRank)
+                //Text("Card Rank").tag(OCRType.cardRank)
                 Text("Player Bet").tag(OCRType.playerBet)
                 Text("Player Balance").tag(OCRType.playerBalance)
                 Text("Player Action").tag(OCRType.playerAction)

@@ -3,305 +3,460 @@ import Vision
 import CoreImage
 import AppKit
 
-/// Main OCR service that coordinates different OCR processors (Thread-safe implementation)
+/// Unified OCR service - handles all OCR types with single processing pipeline
 struct OCRService {
-    private let cardRankOCR = CardRankOCR()
-    private let playerBetOCR = PlayerBetOCR()
-    private let playerBalanceOCR = PlayerBalanceOCR()
-    private let playerActionOCR = PlayerActionOCR()
-    private let tablePotOCR = TablePotOCR()
     
-    // Thread-safe base processor with synchronized access
-    private var baseOCRProcessor: ThreadSafeBaseOCRProcessor
+    // MARK: - Configuration Instances (One per OCR Type)
     
-    // Operation management for cancellation and throttling
+    var baseOCRConfig: OCRParameters
+    var playerBetConfig: OCRParameters
+    var playerBalanceConfig: OCRParameters
+    var playerActionConfig: OCRParameters
+    var tablePotConfig: OCRParameters
+    
+    // MARK: - Bad Match Configuration
+    
+    private let ocrBadMatchThreshold: Float = 0.80  // Save if confidence < 80%
+    private let badOCRDirectory: URL
+    
+    // MARK: - Operation Queue (Simplified)
+    
     private static let operationQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 3 // Limit concurrent OCR operations
+        queue.maxConcurrentOperationCount = 3
         queue.qualityOfService = .userInitiated
         queue.name = "OCRService.operationQueue"
         return queue
     }()
     
-    // Track active operations for cancellation
-    private static var activeOperations: [String: Operation] = [:]
-    private static let operationsLock = NSLock()
+    // MARK: - Reusable Vision Request (Performance Optimization)
     
-    // Debouncing for rapid calls
-    private static var debounceTimers: [String: Timer] = [:]
-    private static let timersLock = NSLock()
+    // Thread-safe callback storage
+    private static var currentOCRCompletion: ((OCRResult) -> Void)?
+    private static let completionLock = NSLock()
+    
+    private static let ocrRequest: VNRecognizeTextRequest = {
+        let request = VNRecognizeTextRequest { req, _ in
+            completionLock.lock()
+            let completion = currentOCRCompletion
+            completionLock.unlock()
+            
+            guard let completion = completion else { return }
+            
+            guard let observations = req.results as? [VNRecognizedTextObservation] else {
+                completion(OCRResult(text: nil, confidence: 0.0))
+                return
+            }
+            
+            let bestCandidate = observations.first?.topCandidates(1).first
+            let result = OCRResult(
+                text: bestCandidate?.string.trimmingCharacters(in: .whitespacesAndNewlines),
+                confidence: bestCandidate?.confidence ?? 0.0
+            )
+            
+            completion(result)
+        }
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        request.minimumTextHeight = 0.0
+        request.recognitionLanguages = ["en-US"]
+        return request
+    }()
+    
+    // MARK: - Initialization
     
     init(baseOCRParameters: OCRParameters = .default) {
-        self.baseOCRProcessor = ThreadSafeBaseOCRProcessor(parameters: baseOCRParameters)
-    }
-    
-    // MARK: - Parameter Management (Thread-safe)
-    
-    /// Update base OCR parameters (Thread-safe)
-    mutating func updateBaseOCRParameters(_ parameters: OCRParameters) {
-        baseOCRProcessor.updateParameters(parameters)
-    }
-    
-    /// Get current base OCR parameters (Thread-safe)
-    func getBaseOCRParameters() -> OCRParameters {
-        return baseOCRProcessor.getParameters()
-    }
-    
-    // MARK: - Operation Management
-    
-    private static func cancelExistingOperation(for key: String) {
-        operationsLock.lock()
-        defer { operationsLock.unlock() }
+        self.baseOCRConfig = baseOCRParameters
+        self.playerBetConfig = Self.playerBetDefaults()
+        self.playerBalanceConfig = Self.playerBalanceDefaults()
+        self.playerActionConfig = Self.playerActionDefaults()
+        self.tablePotConfig = Self.tablePotDefaults()
         
-        if let existingOp = activeOperations[key] {
-            existingOp.cancel()
-            activeOperations.removeValue(forKey: key)
+        // Initialize bad OCR directory
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let baseDirectory = docs.appendingPathComponent("CardTemplates")
+        self.badOCRDirectory = baseDirectory.appendingPathComponent("BadOCR")
+        
+        print("📁 Bad OCR directory: \(badOCRDirectory.path)")
+    }
+    
+    // MARK: - Default Config Generators
+    
+    private static func playerBetDefaults() -> OCRParameters {
+        return OCRParameters(
+            scale: 6.0,
+            sharpness: 0.4,
+            contrast: 1.5,
+            brightness: 0.0,
+            saturation: 0.0,
+            blurRadius: 2.0,
+            threshold: 0.55,
+            morphRadius: 0.5,
+            colorFilterMode: .hsvFilter,
+            hsvHueMin: 60.0,
+            hsvHueMax: 180.0,
+            hsvSatMin: 0.30,
+            hsvSatMax: 1.0,
+            colorDistanceThreshold: 0.3,
+            whiteBrightnessThreshold: 0.7,
+            whiteSaturationMax: 0.2,
+            useAdaptiveThreshold: false,
+            adaptiveThresholdBlockSize: 11,
+            adaptiveThresholdC: 2.0,
+            useBackgroundSubtraction: false,
+            backgroundBlurRadius: 20.0,
+            useBilateralFilter: false,
+            bilateralSigmaColor: 75.0,
+            bilateralSigmaSpace: 75.0,
+            useTextureFilter: false,
+            morphologyMode: .none,
+            morphologySize: 1.0
+        )
+    }
+    
+    private static func playerBalanceDefaults() -> OCRParameters {
+        return OCRParameters(
+            scale: 4.0,
+            sharpness: 0.40,
+            contrast: 1.60,
+            brightness: 0.30,
+            saturation: 0.0,
+            blurRadius: 0.50,
+            threshold: 0.20,
+            morphRadius: 0.10,
+            colorFilterMode: .colorDistance,
+            hsvHueMin: 60.0,
+            hsvHueMax: 180.0,
+            hsvSatMin: 0.3,
+            hsvSatMax: 1.0,
+            colorDistanceThreshold: 0.40,
+            whiteBrightnessThreshold: 0.7,
+            whiteSaturationMax: 0.2,
+            useAdaptiveThreshold: false,
+            adaptiveThresholdBlockSize: 11,
+            adaptiveThresholdC: 2.0,
+            useBackgroundSubtraction: false,
+            backgroundBlurRadius: 20.0,
+            useBilateralFilter: false,
+            bilateralSigmaColor: 75.0,
+            bilateralSigmaSpace: 75.0,
+            useTextureFilter: false,
+            morphologyMode: .none,
+            morphologySize: 1.0
+        )
+    }
+    
+    private static func playerActionDefaults() -> OCRParameters {
+        return OCRParameters(
+            scale: 4.0,
+            sharpness: 0.40,
+            contrast: 1.40,
+            brightness: 0.40,
+            saturation: 0.0,
+            blurRadius: 0.50,
+            threshold: 0.50,
+            morphRadius: 0.10,
+            colorFilterMode: .colorDistance,
+            hsvHueMin: 60.0,
+            hsvHueMax: 180.0,
+            hsvSatMin: 0.3,
+            hsvSatMax: 1.0,
+            colorDistanceThreshold: 0.40,
+            whiteBrightnessThreshold: 0.7,
+            whiteSaturationMax: 0.2,
+            useAdaptiveThreshold: false,
+            adaptiveThresholdBlockSize: 11,
+            adaptiveThresholdC: 2.0,
+            useBackgroundSubtraction: false,
+            backgroundBlurRadius: 20.0,
+            useBilateralFilter: false,
+            bilateralSigmaColor: 75.0,
+            bilateralSigmaSpace: 75.0,
+            useTextureFilter: false,
+            morphologyMode: .none,
+            morphologySize: 1.0
+        )
+    }
+    
+    private static func tablePotDefaults() -> OCRParameters {
+        return OCRParameters(
+            scale: 4.0,
+            sharpness: 0.40,
+            contrast: 1.60,
+            brightness: 0.30,
+            saturation: 0.0,
+            blurRadius: 0.50,
+            threshold: 0.25,
+            morphRadius: 0.10,
+            colorFilterMode: .colorDistance,
+            hsvHueMin: 60.0,
+            hsvHueMax: 180.0,
+            hsvSatMin: 0.3,
+            hsvSatMax: 1.0,
+            colorDistanceThreshold: 0.80,
+            whiteBrightnessThreshold: 0.7,
+            whiteSaturationMax: 0.2,
+            useAdaptiveThreshold: false,
+            adaptiveThresholdBlockSize: 11,
+            adaptiveThresholdC: 2.0,
+            useBackgroundSubtraction: false,
+            backgroundBlurRadius: 20.0,
+            useBilateralFilter: false,
+            bilateralSigmaColor: 75.0,
+            bilateralSigmaSpace: 75.0,
+            useTextureFilter: false,
+            morphologyMode: .none,
+            morphologySize: 1.0
+        )
+    }
+    
+    // MARK: - Parameter Management
+    
+    mutating func updateConfig(for type: OCRType, parameters: OCRParameters) {
+        switch type {
+        case .baseOCR:
+            baseOCRConfig = parameters
+        case .playerBet:
+            playerBetConfig = parameters
+        case .playerBalance:
+            playerBalanceConfig = parameters
+        case .playerAction:
+            playerActionConfig = parameters
+        case .tablePot:
+            tablePotConfig = parameters
         }
     }
     
-    private static func addOperation(_ operation: Operation, for key: String) {
-        operationsLock.lock()
-        defer { operationsLock.unlock() }
-        activeOperations[key] = operation
-    }
-    
-    private static func removeOperation(for key: String) {
-        operationsLock.lock()
-        defer { operationsLock.unlock() }
-        activeOperations.removeValue(forKey: key)
-    }
-    
-    private static func debounceOperation(key: String, delay: TimeInterval = 0.1, operation: @escaping () -> Void) {
-        timersLock.lock()
-        defer { timersLock.unlock() }
-        
-        // Cancel existing timer for this key
-        debounceTimers[key]?.invalidate()
-        
-        // Create new timer
-        let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
-            timersLock.lock()
-            debounceTimers.removeValue(forKey: key)
-            timersLock.unlock()
-            operation()
-        }
-        
-        debounceTimers[key] = timer
-    }
-    
-    // MARK: - Main Entry Points (Thread-safe with debouncing)
-    
-    /// Generic text reading with configurable preprocessing (Thread-safe)
-    func readValue(in screenshot: NSImage,
-                   for region: RegionBox,
-                   completion: @escaping (String?) -> Void) {
-        let operationKey = "readValue_\(region.id.uuidString)"
-        
-        // Debounce rapid calls for the same region
-        Self.debounceOperation(key: operationKey) {
-            self.performReadValue(screenshot: screenshot, region: region, operationKey: operationKey, completion: completion)
+    func getConfig(for type: OCRType) -> OCRParameters {
+        switch type {
+        case .baseOCR:
+            return baseOCRConfig
+        case .playerBet:
+            return playerBetConfig
+        case .playerBalance:
+            return playerBalanceConfig
+        case .playerAction:
+            return playerActionConfig
+        case .tablePot:
+            return tablePotConfig
         }
     }
     
-    private func performReadValue(screenshot: NSImage, region: RegionBox, operationKey: String, completion: @escaping (String?) -> Void) {
-        Self.cancelExistingOperation(for: operationKey)
+    // MARK: - Unified OCR Function
+    
+    /// Universal OCR function - handles all types
+    func performOCR(
+        type: OCRType,
+        screenshot: NSImage,
+        region: RegionBox,
+        completion: @escaping (NSImage, String) -> Void
+    ) {
+        // Get the right config
+        let config = getConfig(for: type)
         
-        let operation = BlockOperation { [baseOCRProcessor] in
-            // Check cancellation before starting work
-            guard !Thread.current.isCancelled else { return }
-            
-            // Perform OCR processing
-            baseOCRProcessor.processGeneric(screenshot: screenshot, region: region) { result in
-                // Always return to main queue
+        // Crop the region
+        guard let cropCI = ImageUtilities.cropROI(screenshot, rect: region.rect) else {
+            completion(NSImage(), "")
+            return
+        }
+        
+        // Preprocess with config
+        let processedCI = OCRPreprocessor.preprocess(image: cropCI, config: config)
+        let previewImage = ImageUtilities.ciToNSImage(processedCI)
+        
+        // Perform OCR on background queue
+        Self.operationQueue.addOperation {
+            self.runVisionOCR(on: processedCI, type: type) { result in
+                // Log the result
+                print("\(type) OCR - Text: '\(result.text ?? "nil")', Confidence: \(result.confidence)")
+                
+                // Check if this is a bad match and save it
+                if result.confidence < self.ocrBadMatchThreshold {
+                    print("⚠️ WARNING: Low OCR confidence (score: \(String(format: "%.2f", result.confidence)))")
+                    self.saveBadOCR(
+                        processedImage: processedCI,
+                        rawText: result.text ?? "",
+                        confidence: result.confidence,
+                        type: type,
+                        region: region
+                    )
+                }
+                
+                // Validate based on type
+                let validatedText = self.validate(result.text, for: type)
+                
+                // Return on main queue
                 DispatchQueue.main.async {
-                    // Final cancellation check before calling completion
-                    guard !Thread.current.isCancelled else { return }
-                    Self.removeOperation(for: operationKey)
-                    completion(result)
+                    completion(previewImage, validatedText)
                 }
             }
         }
-        
-        Self.addOperation(operation, for: operationKey)
-        Self.operationQueue.addOperation(operation)
     }
     
-    /// Card rank reading with specialized preprocessing (Thread-safe)
-    func readCardRank(in screenshot: NSImage,
-                      for region: RegionBox,
-                      completion: @escaping (NSImage, String) -> Void) {
-        let operationKey = "cardRank_\(region.id.uuidString)"
-        
-        Self.debounceOperation(key: operationKey) {
-            self.performCardRankOCR(screenshot: screenshot, region: region, operationKey: operationKey, completion: completion)
+    // MARK: - Vision OCR
+    
+    private func runVisionOCR(on image: CIImage, type: OCRType, completion: @escaping (OCRResult) -> Void) {
+        let ciContext = CIContext()
+        guard let cgImage = ciContext.createCGImage(image, from: image.extent) else {
+            completion(OCRResult(text: nil, confidence: 0.0))
+            return
         }
+        
+        // Store the completion handler in thread-safe way
+        Self.completionLock.lock()
+        Self.currentOCRCompletion = completion
+        Self.completionLock.unlock()
+        
+        // Reuse the static request
+        try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([Self.ocrRequest])
     }
     
-    private func performCardRankOCR(screenshot: NSImage, region: RegionBox, operationKey: String, completion: @escaping (NSImage, String) -> Void) {
-        Self.cancelExistingOperation(for: operationKey)
-        
-        let operation = BlockOperation { [cardRankOCR] in
-            guard !Thread.current.isCancelled else { return }
+    // MARK: - Bad OCR Saving
+    
+    /// Save bad OCR match for review
+    /// Filename format: YYYY-MM-DD_HHmmss_type_conf0.75_rawtext.jpg
+    private func saveBadOCR(
+        processedImage: CIImage,
+        rawText: String,
+        confidence: Float,
+        type: OCRType,
+        region: RegionBox
+    ) {
+        do {
+            try FileManager.default.createDirectory(at: badOCRDirectory, withIntermediateDirectories: true)
             
-            cardRankOCR.process(screenshot: screenshot, region: region) { image, text in
-                DispatchQueue.main.async {
-                    guard !Thread.current.isCancelled else { return }
-                    Self.removeOperation(for: operationKey)
-                    completion(image, text)
-                }
-            }
-        }
-        
-        Self.addOperation(operation, for: operationKey)
-        Self.operationQueue.addOperation(operation)
-    }
-    
-    /// Player bet reading with specialized preprocessing (Thread-safe)
-    func readPlayerBet(in screenshot: NSImage,
-                       for region: RegionBox,
-                       completion: @escaping (NSImage, String) -> Void) {
-        let operationKey = "playerBet_\(region.id.uuidString)"
-        
-        Self.debounceOperation(key: operationKey) {
-            self.performPlayerBetOCR(screenshot: screenshot, region: region, operationKey: operationKey, completion: completion)
-        }
-    }
-    
-    private func performPlayerBetOCR(screenshot: NSImage, region: RegionBox, operationKey: String, completion: @escaping (NSImage, String) -> Void) {
-        Self.cancelExistingOperation(for: operationKey)
-        
-        let operation = BlockOperation { [playerBetOCR] in
-            guard !Thread.current.isCancelled else { return }
+            // Create timestamp
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd_HHmmss"
+            let timestamp = dateFormatter.string(from: Date())
             
-            playerBetOCR.process(screenshot: screenshot, region: region) { image, text in
-                DispatchQueue.main.async {
-                    guard !Thread.current.isCancelled else { return }
-                    Self.removeOperation(for: operationKey)
-                    completion(image, text)
-                }
-            }
-        }
-        
-        Self.addOperation(operation, for: operationKey)
-        Self.operationQueue.addOperation(operation)
-    }
-    
-    /// Player balance reading with specialized preprocessing (Thread-safe)
-    func readPlayerBalance(in screenshot: NSImage,
-                          for region: RegionBox,
-                          completion: @escaping (NSImage, String) -> Void) {
-        let operationKey = "playerBalance_\(region.id.uuidString)"
-        
-        Self.debounceOperation(key: operationKey) {
-            self.performPlayerBalanceOCR(screenshot: screenshot, region: region, operationKey: operationKey, completion: completion)
-        }
-    }
-    
-    private func performPlayerBalanceOCR(screenshot: NSImage, region: RegionBox, operationKey: String, completion: @escaping (NSImage, String) -> Void) {
-        Self.cancelExistingOperation(for: operationKey)
-        
-        let operation = BlockOperation { [playerBalanceOCR] in
-            guard !Thread.current.isCancelled else { return }
+            // Format confidence
+            let confStr = String(format: "%.2f", confidence)
             
-            playerBalanceOCR.process(screenshot: screenshot, region: region) { image, text in
-                DispatchQueue.main.async {
-                    guard !Thread.current.isCancelled else { return }
-                    Self.removeOperation(for: operationKey)
-                    completion(image, text)
-                }
-            }
-        }
-        
-        Self.addOperation(operation, for: operationKey)
-        Self.operationQueue.addOperation(operation)
-    }
-    
-    /// Player action reading with specialized preprocessing (Thread-safe)
-    func readPlayerAction(in screenshot: NSImage,
-                         for region: RegionBox,
-                         completion: @escaping (NSImage, String) -> Void) {
-        let operationKey = "playerAction_\(region.id.uuidString)"
-        
-        Self.debounceOperation(key: operationKey) {
-            self.performPlayerActionOCR(screenshot: screenshot, region: region, operationKey: operationKey, completion: completion)
-        }
-    }
-    
-    private func performPlayerActionOCR(screenshot: NSImage, region: RegionBox, operationKey: String, completion: @escaping (NSImage, String) -> Void) {
-        Self.cancelExistingOperation(for: operationKey)
-        
-        let operation = BlockOperation { [playerActionOCR] in
-            guard !Thread.current.isCancelled else { return }
+            // Clean raw text for filename (remove special chars, limit length)
+            let cleanedText = rawText
+                .replacingOccurrences(of: " ", with: "_")
+                .replacingOccurrences(of: "/", with: "")
+                .replacingOccurrences(of: "\\", with: "")
+                .replacingOccurrences(of: ":", with: "")
+                .replacingOccurrences(of: "*", with: "")
+                .replacingOccurrences(of: "?", with: "")
+                .replacingOccurrences(of: "\"", with: "")
+                .replacingOccurrences(of: "<", with: "")
+                .replacingOccurrences(of: ">", with: "")
+                .replacingOccurrences(of: "|", with: "")
+                .prefix(30)  // Limit length to avoid filesystem issues
             
-            playerActionOCR.process(screenshot: screenshot, region: region) { image, text in
-                DispatchQueue.main.async {
-                    guard !Thread.current.isCancelled else { return }
-                    Self.removeOperation(for: operationKey)
-                    completion(image, text)
-                }
-            }
-        }
-        
-        Self.addOperation(operation, for: operationKey)
-        Self.operationQueue.addOperation(operation)
-    }
-    
-    /// Table pot reading with specialized preprocessing (Thread-safe)
-    func readTablePot(in screenshot: NSImage,
-                      for region: RegionBox,
-                      completion: @escaping (NSImage, String) -> Void) {
-        let operationKey = "tablePot_\(region.id.uuidString)"
-        
-        Self.debounceOperation(key: operationKey) {
-            self.performTablePotOCR(screenshot: screenshot, region: region, operationKey: operationKey, completion: completion)
-        }
-    }
-    
-    private func performTablePotOCR(screenshot: NSImage, region: RegionBox, operationKey: String, completion: @escaping (NSImage, String) -> Void) {
-        Self.cancelExistingOperation(for: operationKey)
-        
-        let operation = BlockOperation { [tablePotOCR] in
-            guard !Thread.current.isCancelled else { return }
+            let textPart = cleanedText.isEmpty ? "empty" : String(cleanedText)
             
-            tablePotOCR.process(screenshot: screenshot, region: region) { image, text in
-                DispatchQueue.main.async {
-                    guard !Thread.current.isCancelled else { return }
-                    Self.removeOperation(for: operationKey)
-                    completion(image, text)
-                }
+            // Get type name
+            let typeName = getTypeString(type)
+            
+            // Build filename: 2025-10-11_143022_playerBet_conf0.75_123BB.jpg
+            let filename = "\(timestamp)_\(typeName)_conf\(confStr)_\(textPart).jpg"
+            let filePath = badOCRDirectory.appendingPathComponent(filename)
+            
+            // Convert CIImage to NSImage and save as JPEG
+            let nsImage = ImageUtilities.ciToNSImage(processedImage)
+            let success = ImageUtilities.saveAsJPEG(nsImage, to: filePath, quality: 0.95)
+            
+            if success {
+                print("💾 Saved bad OCR: \(filename)")
+            } else {
+                print("❌ Failed to save bad OCR image")
             }
+            
+        } catch {
+            print("❌ Failed to save bad OCR: \(error)")
         }
-        
-        Self.addOperation(operation, for: operationKey)
-        Self.operationQueue.addOperation(operation)
     }
     
-    // MARK: - Preview Utilities (Thread-safe)
+    /// Get string name for OCR type
+    private func getTypeString(_ type: OCRType) -> String {
+        switch type {
+        case .baseOCR:
+            return "baseOCR"
+        case .playerBet:
+            return "playerBet"
+        case .playerBalance:
+            return "playerBalance"
+        case .playerAction:
+            return "playerAction"
+        case .tablePot:
+            return "tablePot"
+        }
+    }
+    
+    // MARK: - Validation
+    
+    private func validate(_ text: String?, for type: OCRType) -> String {
+        switch type {
+        case .baseOCR:
+            return text ?? ""
+        case .playerBet:
+            return OCRValidation.validatePlayerBet(text)
+        case .playerBalance:
+            return OCRValidation.validatePlayerBalance(text)
+        case .playerAction:
+            return OCRValidation.validatePlayerAction(text)
+        case .tablePot:
+            return OCRValidation.validateTablePot(text)
+        }
+    }
+    
+    // MARK: - Preview Utilities
     
     func croppedImage(in screenshot: NSImage, for region: RegionBox) -> NSImage? {
-        // Image utilities are already thread-safe (pure functions)
         return ImageUtilities.croppedImage(in: screenshot, for: region)
     }
     
-    func preprocessedImage(in screenshot: NSImage, for region: RegionBox) -> NSImage? {
-        // Thread-safe preprocessing
-        return baseOCRProcessor.preprocessedPreviewImage(from: screenshot, region: region)
+    func preprocessedImage(in screenshot: NSImage, for region: RegionBox, type: OCRType) -> NSImage? {
+        guard let cropCI = ImageUtilities.cropROI(screenshot, rect: region.rect) else { return nil }
+        let config = getConfig(for: type)
+        let processedCI = OCRPreprocessor.preprocess(image: cropCI, config: config)
+        return ImageUtilities.ciToNSImage(processedCI)
     }
     
     func averageColorString(in screenshot: NSImage, for region: RegionBox) -> String? {
-        // Image utilities are already thread-safe (pure functions)
         return ImageUtilities.averageColorString(in: screenshot, for: region)
     }
     
-    // MARK: - Async Support (Thread-safe)
+    /// Get bad OCR directory for UI "Open Bad OCR" button
+    func getBadOCRDirectory() -> URL {
+        return badOCRDirectory
+    }
     
-#if swift(>=5.5)
-    func readValue(in screenshot: NSImage, for region: RegionBox) async -> String? {
-        await withCheckedContinuation { continuation in
-            readValue(in: screenshot, for: region) { value in
-                continuation.resume(returning: value)
-            }
+    // MARK: - Wrapper Functions (Backward Compatibility)
+    
+    /// Read player bet - wrapper for performOCR
+    func readPlayerBet(in screenshot: NSImage, for region: RegionBox,
+                       completion: @escaping (NSImage, String) -> Void) {
+        performOCR(type: .playerBet, screenshot: screenshot, region: region, completion: completion)
+    }
+    
+    /// Read player balance - wrapper for performOCR
+    func readPlayerBalance(in screenshot: NSImage, for region: RegionBox,
+                          completion: @escaping (NSImage, String) -> Void) {
+        performOCR(type: .playerBalance, screenshot: screenshot, region: region, completion: completion)
+    }
+    
+    /// Read player action - wrapper for performOCR
+    func readPlayerAction(in screenshot: NSImage, for region: RegionBox,
+                         completion: @escaping (NSImage, String) -> Void) {
+        performOCR(type: .playerAction, screenshot: screenshot, region: region, completion: completion)
+    }
+    
+    /// Read table pot - wrapper for performOCR
+    func readTablePot(in screenshot: NSImage, for region: RegionBox,
+                      completion: @escaping (NSImage, String) -> Void) {
+        performOCR(type: .tablePot, screenshot: screenshot, region: region, completion: completion)
+    }
+    
+    /// Read generic value (baseOCR) - wrapper for performOCR
+    func readValue(in screenshot: NSImage, for region: RegionBox,
+                   completion: @escaping (String?) -> Void) {
+        performOCR(type: .baseOCR, screenshot: screenshot, region: region) { _, text in
+            completion(text.isEmpty ? nil : text)
         }
     }
-#endif
 }

@@ -1,6 +1,6 @@
 import SwiftUI
 import ScreenCaptureKit
-import AVFoundation
+//import AVFoundation Go Back to using AV FOundation maybe 
 
 class PourCoffee: ObservableObject {
     @Published var image: NSImage?
@@ -37,11 +37,12 @@ class PourCoffee: ObservableObject {
         
         config.width = Int(contentRect.width * scale)
         config.height = Int(contentRect.height * scale)
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 5)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 10)
         config.queueDepth = 3
-        config.showsCursor = true
-        config.colorSpaceName = CGColorSpace.sRGB
+        config.showsCursor = false //Disable seeing mouse to prevent errors
+        config.colorSpaceName = CGColorSpace.sRGB //COnvert to SRGB for standardization and saving overhead
         config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.capturesAudio = false
         
         print("Capturing at current size: \(config.width) x \(config.height)")
         print("Content rect: \(contentRect), Scale: \(scale)")
